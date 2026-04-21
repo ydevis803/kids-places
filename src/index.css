@@ -1,0 +1,57 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Quicksand:wght@500;600;700&display=swap');
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@theme {
+  --color-primary: #1B4F93;
+  --color-on-primary: #FFFFFF;
+  --color-primary-container: #3371C2;
+  --color-on-primary-container: #FFFFFF;
+  
+  --color-secondary: #F4A4B4;
+  --color-on-secondary: #4A1221;
+  --color-secondary-container: #FDE8ED;
+  --color-on-secondary-container: #7C1D36;
+
+  --color-tertiary: #87C6E5;
+  --color-on-tertiary: #042E45;
+  --color-tertiary-container: #D4EFFC;
+  --color-on-tertiary-container: #0A4363;
+
+  --color-background: #F0F6FA;
+  --color-surface: #F7FBFF;
+  --color-surface-container-lowest: #FFFFFF;
+  --color-surface-container-low: #EBF3F9;
+  --color-surface-container: #E0EDF5;
+  --color-surface-container-high: #D1E5F1;
+  --color-surface-container-highest: #C2DCEB;
+  --color-surface-variant: #C2DCEB;
+
+  --color-on-background: #00133A;
+  --color-on-surface: #00133A;
+  --color-on-surface-variant: #28445E;
+
+  --color-outline: #779AB5;
+  --color-outline-variant: #A7C2D6;
+  
+  --color-inverse-surface: #00133A;
+  --color-inverse-on-surface: #EBF3F9;
+  --color-inverse-primary: #87C6E5;
+
+  --font-headline: "Nunito", sans-serif;
+  --font-body: "Quicksand", sans-serif;
+  --font-label: "Quicksand", sans-serif;
+}
+
+@layer utilities {
+  .shadow-ambient {
+    box-shadow: 0 16px 32px rgba(27, 79, 147, 0.1); /* Stitch blue tinted shadow */
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
