@@ -766,7 +766,7 @@ export default function MapEditor() {
         onDismiss={() => setSocialHelper(null)}
       />
     )}
-    <div className="flex flex-col lg:flex-row h-full w-full">
+    <div className="flex flex-col lg:flex-row h-full w-full overflow-hidden">
       {/* ── Mobile List/Map Toggle ──────────────────────────────────────────── */}
       <div className="lg:hidden flex bg-surface-container-low border-b border-outline-variant/20 shrink-0">
         <button
@@ -937,7 +937,7 @@ export default function MapEditor() {
       </aside>
 
       {/* ── Map Panel ─────────────────────────────────────────────────────────── */}
-      <main className={`w-full lg:w-[58%] xl:w-[62%] h-full relative ${
+      <main className={`w-full lg:w-[58%] xl:w-[62%] relative flex-1 min-h-0 ${
         mobileTab === 'list' ? 'hidden lg:block' : 'block'
       }`}>
         <LeafletMap

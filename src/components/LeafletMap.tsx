@@ -59,7 +59,12 @@ export default function LeafletMap({
     }).addTo(map);
     mapRef.current = map;
     setMapReady(true);
-    return () => { map.remove(); mapRef.current = null; setMapReady(false); };
+
+    // Re-measure whenever the container is resized (e.g. revealed after being hidden on mobile)
+    const ro = new ResizeObserver(() => { map.invalidateSize(); });
+    ro.observe(containerRef.current);
+
+    return () => { ro.disconnect(); map.remove(); mapRef.current = null; setMapReady(false); };
   }, []);
 
   // ── User location marker ───────────────────────────────────────────────────
