@@ -607,6 +607,7 @@ export default function MapEditor() {
   const [showFavourites, setShowFavourites] = useState(true);
   const [favCenterTrigger, setFavCenterTrigger] = useState(0);
   const [suggestedMode, setSuggestedMode] = useState(false);
+  const [mobileTab, setMobileTab] = useState<'list' | 'map'>('list');
   const fileRef = useRef<HTMLInputElement>(null);
   const { savedPlaces } = usePlaces();
 
@@ -766,8 +767,30 @@ export default function MapEditor() {
       />
     )}
     <div className="flex flex-col lg:flex-row h-full w-full">
+      {/* ── Mobile List/Map Toggle ──────────────────────────────────────────── */}
+      <div className="lg:hidden flex bg-surface-container-low border-b border-outline-variant/20 shrink-0">
+        <button
+          onClick={() => setMobileTab('list')}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+            mobileTab === 'list' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant'
+          }`}
+        >
+          <MapPin className="w-4 h-4" /> Places List
+        </button>
+        <button
+          onClick={() => setMobileTab('map')}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+            mobileTab === 'map' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant'
+          }`}
+        >
+          <Compass className="w-4 h-4" /> Map View
+        </button>
+      </div>
+
       {/* ── Sidebar ─────────────────────────────────────────────────────────── */}
-      <aside className="w-full lg:w-[42%] xl:w-[38%] h-full flex flex-col bg-surface-container-low border-r border-surface-container-high/50 relative z-10 shadow-[20px_0_40px_rgba(44,47,49,0.02)] overflow-y-auto overflow-x-hidden">
+      <aside className={`w-full lg:w-[42%] xl:w-[38%] h-full flex flex-col bg-surface-container-low border-r border-surface-container-high/50 relative z-10 shadow-[20px_0_40px_rgba(44,47,49,0.02)] overflow-y-auto overflow-x-hidden ${
+        mobileTab === 'map' ? 'hidden lg:flex' : 'flex'
+      }`}>
         <div className="p-6 md:p-8 flex flex-col gap-8">
 
           {/* Header & Input Hub */}
@@ -914,7 +937,9 @@ export default function MapEditor() {
       </aside>
 
       {/* ── Map Panel ─────────────────────────────────────────────────────────── */}
-      <main className="hidden lg:block w-full lg:w-[58%] xl:w-[62%] h-full relative">
+      <main className={`w-full lg:w-[58%] xl:w-[62%] h-full relative ${
+        mobileTab === 'list' ? 'hidden lg:block' : 'block'
+      }`}>
         <LeafletMap
           places={places}
           selectedIds={selectedIds}
