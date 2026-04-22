@@ -76,6 +76,35 @@ export default function Layout() {
         <main className="flex-1 overflow-y-auto w-full pb-24 lg:pb-0 h-full relative">
             <Outlet />
         </main>
+
+        {/* Mobile Bottom Tab Bar */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low/90 backdrop-blur-xl border-t border-outline-variant/20 flex items-stretch h-20 pb-safe">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.name}
+                to={item.path}
+                end={item.path === '/'}
+                className={({ isActive }) =>
+                  cn(
+                    "flex-1 flex flex-col items-center justify-center gap-1 py-2 transition-colors",
+                    isActive ? "text-primary" : "text-on-surface-variant"
+                  )
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <div className={cn("p-1.5 rounded-xl transition-all", isActive && "bg-primary-container")}>
+                      <Icon className={cn("w-5 h-5", isActive && "fill-current")} />
+                    </div>
+                    <span className="text-[10px] font-medium leading-none">{item.name}</span>
+                  </>
+                )}
+              </NavLink>
+            );
+          })}
+        </nav>
       </div>
     </div>
   );
