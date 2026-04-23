@@ -3,8 +3,10 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
   type ReactNode,
 } from 'react';
+import { supabase } from '../lib/supabase';
 
 export interface Collection {
   id: string;
@@ -29,6 +31,20 @@ function saveCollections(collections: Collection[]) {
   try { localStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(collections)); } catch { /* ignore */ }
 }
 
+// ── Supabase row ↔ Collection converters ──────────────────────────────────────
+function toCollection(row: Record<string, unknown>): Collection {
+  return {
+    id:        String(row.id),
+    name:      String(row.name),
+    placeIds:  Array.isArray(row.place_ids) ? (row.place_ids as string[]) : [],
+    emoji:     String(row.emoji ?? '📍'),
+    createdAt: row.created_at ? new Date(row.created_at as string).getTime() : Date.now(),
+  };
+}
+function toRow(c: Collection) {
+  return { id: c.id, name: c.name, place_ids: c.placeIds, emoji: c.emoji };
+}
+
 interface CollectionsContextValue {
   collections: Collection[];
   createCollection: (name: string, emoji?: string) => Collection;
@@ -43,10 +59,37 @@ const CollectionsContext = createContext<CollectionsContextValue | null>(null);
 export function CollectionsProvider({ children }: { children: ReactNode }) {
   const [collections, setCollections] = useState<Collection[]>(loadCollections);
 
-  const update = useCallback((fn: (prev: Collection[]) => Collection[]) => {
+  // On mount: load from Supabase if configured
+  useEffect(() => {
+    if (!supabase) return;
+    supabase
+      .from('collections')
+      .select('*')
+      .order('created_at', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) { console.error('[Supabase] collections load error:', error.message); return; }
+        if (data) {
+          const cols = (data as Record<string, unknown>[]).map(toCollection);
+          setCollections(cols);
+          saveCollections(cols);
+        }
+      });
+  }, []);
+
+  const update = useCallback((fn: (prev: Collection[]) => Collection[], updatedCol?: Collection, deletedId?: string) => {
     setCollections(prev => {
       const next = fn(prev);
       saveCollections(next);
+      // Sync to Supabase
+      if (deletedId) {
+        supabase?.from('collections').delete().eq('id', deletedId).then(({ error }) => {
+          if (error) console.error('[Supabase] collections delete error:', error.message);
+        });
+      } else if (updatedCol) {
+        supabase?.from('collections').upsert(toRow(updatedCol)).then(({ error }) => {
+          if (error) console.error('[Supabase] collections upsert error:', error.message);
+        });
+      }
       return next;
     });
   }, []);
@@ -59,32 +102,53 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
       emoji: emoji ?? EMOJIS[Math.floor(Math.random() * EMOJIS.length)],
       createdAt: Date.now(),
     };
-    update(prev => [...prev, col]);
+    update(prev => [...prev, col], col);
     return col;
   }, [update]);
 
   const renameCollection = useCallback((id: string, name: string) => {
-    update(prev => prev.map(c => c.id === id ? { ...c, name } : c));
+    update(prev => {
+      const next = prev.map(c => c.id === id ? { ...c, name } : c);
+      const updated = next.find(c => c.id === id);
+      if (updated) supabase?.from('collections').upsert(toRow(updated)).then(({ error }) => {
+        if (error) console.error('[Supabase] collections upsert error:', error.message);
+      });
+      return next;
+    });
   }, [update]);
 
   const deleteCollection = useCallback((id: string) => {
-    update(prev => prev.filter(c => c.id !== id));
+    update(prev => prev.filter(c => c.id !== id), undefined, id);
   }, [update]);
 
   const addToCollection = useCallback((collectionId: string, placeId: string) => {
-    update(prev => prev.map(c =>
-      c.id === collectionId && !c.placeIds.includes(placeId)
-        ? { ...c, placeIds: [...c.placeIds, placeId] }
-        : c
-    ));
+    update(prev => {
+      const next = prev.map(c =>
+        c.id === collectionId && !c.placeIds.includes(placeId)
+          ? { ...c, placeIds: [...c.placeIds, placeId] }
+          : c
+      );
+      const updated = next.find(c => c.id === collectionId);
+      if (updated) supabase?.from('collections').upsert(toRow(updated)).then(({ error }) => {
+        if (error) console.error('[Supabase] collections upsert error:', error.message);
+      });
+      return next;
+    });
   }, [update]);
 
   const removeFromCollection = useCallback((collectionId: string, placeId: string) => {
-    update(prev => prev.map(c =>
-      c.id === collectionId
-        ? { ...c, placeIds: c.placeIds.filter(id => id !== placeId) }
-        : c
-    ));
+    update(prev => {
+      const next = prev.map(c =>
+        c.id === collectionId
+          ? { ...c, placeIds: c.placeIds.filter(id => id !== placeId) }
+          : c
+      );
+      const updated = next.find(c => c.id === collectionId);
+      if (updated) supabase?.from('collections').upsert(toRow(updated)).then(({ error }) => {
+        if (error) console.error('[Supabase] collections upsert error:', error.message);
+      });
+      return next;
+    });
   }, [update]);
 
   return (
