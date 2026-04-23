@@ -1,11 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { Compass, Home, Map as MapIcon, Heart, User, FolderHeart } from 'lucide-react';
-import clsx from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-export function cn(...inputs: (string | undefined | null | false)[]) {
-  return twMerge(clsx(inputs));
-}
+import { cn } from '../lib/cn';
 
 export default function Layout() {
   const navItems = [
