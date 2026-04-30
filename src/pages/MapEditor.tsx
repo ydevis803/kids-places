@@ -26,6 +26,7 @@ import {
   Loader2,
   ExternalLink,
   ClipboardPaste,
+  AlertTriangle,
 } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 import { GoogleGenAI } from '@google/genai';
@@ -51,17 +52,16 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-async function geocodeName(name: string): Promise<{ lat: number; lng: number; geocodedName?: string; website?: string; fee?: string; charge?: string } | null> {
+/** Single Nominatim lookup — returns null on miss. */
+async function nominatimLookup(query: string): Promise<{ lat: number; lng: number; geocodedName?: string; website?: string; fee?: string; charge?: string } | null> {
   try {
-    // countrycodes=gb biases results to the UK; viewbox covers Great Britain + Northern Ireland
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1&extratags=1&countrycodes=gb&viewbox=-8.65,49.82,1.77,60.86&bounded=0`,
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&extratags=1&countrycodes=gb&viewbox=-8.65,49.82,1.77,60.86&bounded=0`,
       { headers: { 'Accept-Language': 'en' } }
     );
     const data = await res.json();
     if (!data[0]) return null;
     const { lat, lon, display_name, extratags } = data[0];
-    // Extract just the first part of display_name (before the first comma) as the short official name
     const shortName = (display_name as string)?.split(',')[0]?.trim();
     return {
       lat: parseFloat(lat),
@@ -74,6 +74,64 @@ async function geocodeName(name: string): Promise<{ lat: number; lng: number; ge
   } catch {
     return null;
   }
+}
+
+/** Delay helper to respect Nominatim's 1 req/sec rate limit. */
+function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+/** Extract a UK postcode from a string, e.g. "Mizens Railway GU21 2JW" → "GU21 2JW" */
+const UK_POSTCODE_RE = /\b([A-Z]{1,2}[0-9][0-9A-Z]?\s?[0-9][A-Z]{2})\b/i;
+function extractUKPostcode(s: string): string | undefined {
+  const m = UK_POSTCODE_RE.exec(s);
+  return m ? m[1].toUpperCase().replace(/\s+/, ' ').trim() : undefined;
+}
+/** Remove an embedded UK postcode from a place name. */
+function stripPostcodeFromName(name: string): string {
+  return name.replace(UK_POSTCODE_RE, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+// ─── Extraction debug tracker (reset before each run) ────────────────────────
+let _debug = {
+  geminiCount: 0,
+  geocodedCount: 0,
+  failed: [] as { name: string; reason: string }[],
+};
+function resetDebug() {
+  _debug = { geminiCount: 0, geocodedCount: 0, failed: [] };
+}
+
+/** Geocode a place name, trying multiple fallback strategies before giving up. */
+async function geocodeName(name: string, postcode?: string): Promise<{ lat: number; lng: number; geocodedName?: string; website?: string; fee?: string; charge?: string } | null> {
+  // Extract a postcode embedded in the name (e.g. "Mizens Railway GU21 2JW") if not provided separately
+  const embeddedPostcode = extractUKPostcode(name);
+  const resolvedPostcode = postcode ?? embeddedPostcode;
+  const cleanName = embeddedPostcode ? stripPostcodeFromName(name) : name;
+
+  // Step 1: name + postcode (only when postcode is available)
+  if (resolvedPostcode) {
+    const result = await nominatimLookup(`${cleanName} ${resolvedPostcode}`);
+    if (result) return result;
+    await sleep(1100);
+  }
+
+  // Step 2: name, UK
+  const withUK = await nominatimLookup(`${cleanName}, UK`);
+  if (withUK) return withUK;
+  await sleep(1100);
+
+  // Step 3: bare name
+  const bare = await nominatimLookup(cleanName);
+  if (bare) return bare;
+  await sleep(1100);
+
+  // Step 4: postcode only (only when postcode is available)
+  if (resolvedPostcode) {
+    const result = await nominatimLookup(resolvedPostcode);
+    if (result) return { ...result, geocodedName: resolvedPostcode };
+    await sleep(1100);
+  }
+
+  return null;
 }
 
 function isUrl(s: string): boolean {
@@ -235,7 +293,7 @@ Rules:
 - "postcode" must be the raw postcode only (e.g. "SW1A 1AA"), never embedded in the name.
 - "price" must be the actual price mentioned in the text. If no price is mentioned, do NOT include the field.
 - Do not invent or guess prices or postcodes.
-- Limit to at most 8 places.
+- Return ALL places found in the text, up to 20 maximum.
 - If no real places are found return [].`;
 
 const SEARCH_PROMPT = `You are a knowledgeable UK family activity guide. For the given search query, suggest up to 8 real, well-known, family-friendly places or venues in the UK that best match the query. Focus on places that genuinely exist and are suitable for children.
@@ -256,7 +314,7 @@ Rules:
 - Prefer popular, well-reviewed, family-friendly venues.
 - If postcode is uncertain, omit it rather than guess.
 - If price is uncertain, omit it rather than guess.
-- Return at most 8 places.`;
+- Return at most 20 places.`;
 
 async function searchPlacesByQuery(query: string): Promise<Place[]> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -325,12 +383,20 @@ async function parseGeminiPlaces(raw: string): Promise<Place[]> {
     price?: string; ageGroup?: string; outdoor?: boolean;
   }> = [];
   try { parsed = JSON.parse(cleaned); } catch { parsed = []; }
+
+  _debug.geminiCount = parsed.length; // record how many Gemini returned
+
   const places: Place[] = [];
   for (const item of parsed) {
-    // Use "name + postcode" as geocoding query when postcode is available — much more accurate
-    const geocodeQuery = item.postcode ? `${item.name} ${item.postcode}` : item.name;
-    const coords = await geocodeName(geocodeQuery);
+    // Also check if the name itself contains an embedded postcode (e.g. Gemini included it)
+    const embeddedPostcode = extractUKPostcode(item.name);
+    const resolvedPostcode = item.postcode ?? embeddedPostcode;
+    const cleanName = embeddedPostcode ? stripPostcodeFromName(item.name) : item.name;
+    const coords = await geocodeName(cleanName, resolvedPostcode);
+    // Respect Nominatim rate limit between places (geocodeName already sleeps between its own retries)
+    await sleep(1100);
     if (coords) {
+      _debug.geocodedCount++;
       let price = item.price;
 
       // Source 2: OSM extratags returned directly by geocoding
@@ -349,7 +415,11 @@ async function parseGeminiPlaces(raw: string): Promise<Place[]> {
         price = await enrichPriceFromWebsite(coords.website, apiKey, item.name);
       }
 
-      places.push({ id: uid(), ...item, price, ...coords });
+      places.push({ id: uid(), ...item, name: cleanName, postcode: resolvedPostcode, price, ...coords });
+    } else {
+      // Geocoding failed — record in debug but silently drop the place
+      const failReason = `Not found after all lookup strategies`;
+      _debug.failed.push({ name: item.name, reason: failReason });
     }
   }
   return places;
@@ -359,7 +429,7 @@ async function callGemini(apiKey: string, text: string): Promise<Place[]> {
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
-    contents: `${EXTRACTION_PROMPT}\n\nText:\n${text.slice(0, 8000)}`,
+    contents: `${EXTRACTION_PROMPT}\n\nText:\n${text.slice(0, 15000)}`,
   });
   return parseGeminiPlaces(response.text ?? '[]');
 }
@@ -425,6 +495,9 @@ interface PlaceCardProps {
 function PlaceCard({ place, selected, onToggleSelect }: PlaceCardProps) {
   const { savePlace, unsavePlace, isSaved } = usePlaces();
   const saved = isSaved(place.id);
+
+  // Silently omit any place that couldn't be located — never render a card for it
+  if (place.geocodeFailed) return null;
 
   return (
     <article className="bg-surface-container-lowest rounded-2xl p-5 shadow-[0_12px_24px_rgba(44,47,49,0.04)] border border-outline-variant/10 relative group overflow-hidden transition-all hover:shadow-[0_16px_32px_rgba(44,47,49,0.06)]">
@@ -606,8 +679,12 @@ export default function MapEditor() {
   const [socialHelper, setSocialHelper] = useState<string | null>(null);
   const [showFavourites, setShowFavourites] = useState(true);
   const [favCenterTrigger, setFavCenterTrigger] = useState(0);
-  const [suggestedMode, setSuggestedMode] = useState(false);
   const [mobileTab, setMobileTab] = useState<'list' | 'map'>('list');
+  const [extractionDebug, setExtractionDebug] = useState<{
+    geminiCount: number;
+    geocodedCount: number;
+    failed: { name: string; reason: string }[];
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { savedPlaces } = usePlaces();
 
@@ -623,24 +700,57 @@ export default function MapEditor() {
     if (!input.trim()) return;
     setLoading(true);
     setError(null);
-    setSuggestedMode(false);
+    setExtractionDebug(null);
+    resetDebug();
     try {
+      const trimmedInput = input.trim();
+      // A standalone postcode — skip Gemini entirely and geocode it directly
+      const isOnlyPostcode = /^[A-Z]{1,2}[0-9][0-9A-Z]?\s?[0-9][A-Z]{2}$/i.test(trimmedInput);
+
+      // "Name + postcode" short input (e.g. "Church Crookham GU52 8AU") — also bypass Gemini
+      const namePostcodeMatch = trimmedInput.match(/^(.+?)\s+([A-Z]{1,2}[0-9][0-9A-Z]?\s?[0-9][A-Z]{2})$/i);
+      const isShortNameWithPostcode = !!(namePostcodeMatch && trimmedInput.split(/\s+/).length <= 6);
+
+      if (isOnlyPostcode || isShortNameWithPostcode) {
+        const postcode = isOnlyPostcode ? trimmedInput.toUpperCase() : namePostcodeMatch![2].toUpperCase();
+        const name = isOnlyPostcode ? trimmedInput.toUpperCase() : namePostcodeMatch![1].trim();
+
+        // Run the same 4-step chain: name+postcode → name,UK → bare name → postcode only
+        const coords = isOnlyPostcode
+          ? await nominatimLookup(postcode)
+          : (
+              await nominatimLookup(`${name} ${postcode}`) ||
+              (await sleep(1100), await nominatimLookup(`${name}, UK`)) ||
+              (await sleep(1100), await nominatimLookup(name)) ||
+              (await sleep(1100), await nominatimLookup(postcode))
+            );
+
+        if (coords) {
+          const pin: Place = {
+            id: uid(),
+            name,
+            description: postcode !== name ? `${name}, ${postcode}` : `Postcode area ${postcode}`,
+            category: 'Other',
+            lat: coords.lat,
+            lng: coords.lng,
+            geocodedName: (coords as { geocodedName?: string }).geocodedName ?? name,
+          };
+          setPlaces([pin]);
+          setSelectedIds(new Set([pin.id]));
+        } else {
+          setError(`Could not locate "${trimmedInput}" on the map.`);
+        }
+        return;
+      }
+
       const extracted = await extractPlacesFromText(input);
+      setExtractionDebug({ ..._debug, failed: [..._debug.failed] });
+
       if (extracted.length) {
         setPlaces(extracted);
-        setSelectedIds(new Set(extracted.map((p) => p.id)));
-      } else if (!isUrl(input.trim())) {
-        // Plain-text query with no extractable places — fall back to AI-powered search suggestions
-        const suggested = await searchPlacesByQuery(input.trim());
-        if (suggested.length) {
-          setPlaces(suggested);
-          setSelectedIds(new Set(suggested.map((p) => p.id)));
-          setSuggestedMode(true);
-        } else {
-          setError('No places found. Try being more specific, e.g. "soft play centres in Manchester".');
-        }
+        setSelectedIds(new Set(extracted.filter(p => !p.geocodeFailed).map((p) => p.id)));
       } else {
-        setError('No recognisable places found. Try a more descriptive input or paste a direct article URL.');
+        setError('No places found. Make sure the text contains specific place names, or include a postcode alongside the name.');
       }
     } catch (e) {
       const err = e as Error & { socialUrl?: string };
@@ -660,13 +770,16 @@ export default function MapEditor() {
     setInput(text);
     setLoading(true);
     setError(null);
+    setExtractionDebug(null);
+    resetDebug();
     try {
       const extracted = await extractPlacesFromText(text);
+      setExtractionDebug({ ..._debug, failed: [..._debug.failed] });
       if (!extracted.length) {
         setError('No identifiable places found in that caption. Try adding more location details.');
       } else {
         setPlaces(extracted);
-        setSelectedIds(new Set(extracted.map((p) => p.id)));
+        setSelectedIds(new Set(extracted.filter(p => !p.geocodeFailed).map((p) => p.id)));
       }
     } catch (e) {
       setError((e as Error).message ?? 'Extraction failed.');
@@ -713,7 +826,7 @@ export default function MapEditor() {
     });
   }, []);
 
-  const selectAll = () => setSelectedIds(new Set(places.map((p) => p.id)));
+  const selectAll = () => setSelectedIds(new Set(places.filter(p => !p.geocodeFailed).map((p) => p.id)));
   const clearAll = () => setSelectedIds(new Set());
 
   // ── Distance sorting ────────────────────────────────────────────────────────
@@ -897,27 +1010,48 @@ export default function MapEditor() {
               <div className="flex justify-between items-end mb-2">
                 <div>
                   <h2 className="text-xl font-headline font-bold text-on-surface tracking-tight">
-                    {suggestedMode ? 'Suggested Places' : 'Extracted Places'}
+                    Extracted Places
                   </h2>
-                  {suggestedMode && (
-                    <p className="text-xs font-body text-on-surface-variant mt-0.5 flex items-center gap-1">
-                      <Sparkles className="w-3 h-3 text-primary" />
-                      AI suggestions based on your search
-                    </p>
-                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-label text-on-surface-variant font-medium bg-surface-container-high px-2 py-1 rounded-md">
-                    {places.length} found
+                    {places.filter(p => !p.geocodeFailed).length} mapped
+                    {extractionDebug && extractionDebug.failed.length > 0 && (
+                      <span className="text-amber-600"> · {extractionDebug.failed.length} not located</span>
+                    )}
                   </span>
                   <button
-                    onClick={selectedIds.size === places.length ? clearAll : selectAll}
+                    onClick={selectedIds.size === places.filter(p => !p.geocodeFailed).length ? clearAll : selectAll}
                     className="text-xs font-label text-primary hover:underline"
                   >
-                    {selectedIds.size === places.length ? 'Deselect all' : 'Select all'}
+                    {selectedIds.size === places.filter(p => !p.geocodeFailed).length ? 'Deselect all' : 'Select all'}
                   </button>
                 </div>
               </div>
+
+              {/* Extraction debug summary */}
+              {extractionDebug && (
+                <div className="rounded-xl border border-outline-variant/15 bg-surface-container-lowest p-4 flex flex-col gap-2 text-xs font-body">
+                  <p className="font-semibold text-on-surface-variant uppercase tracking-wider text-[10px]">Extraction debug</p>
+                  <div className="flex gap-4">
+                    <span className="text-on-surface-variant">🧠 Gemini returned: <strong className="text-on-surface">{extractionDebug.geminiCount}</strong></span>
+                    <span className="text-on-surface-variant">✅ Geocoded: <strong className="text-on-surface">{extractionDebug.geocodedCount}</strong></span>
+                    {extractionDebug.failed.length > 0 && (
+                      <span className="text-amber-600">⚠️ Not located: <strong>{extractionDebug.failed.length}</strong></span>
+                    )}
+                  </div>
+                  {extractionDebug.failed.length > 0 && (
+                    <ul className="flex flex-col gap-1 mt-1">
+                      {extractionDebug.failed.map((f) => (
+                        <li key={f.name} className="flex gap-2 text-amber-700 bg-amber-50 rounded-lg px-3 py-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                          <span><strong>{f.name}</strong> — {f.reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {places.map((place) => (
                 <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} />
               ))}
@@ -941,7 +1075,7 @@ export default function MapEditor() {
         mobileTab === 'list' ? 'hidden lg:block' : 'block'
       }`}>
         <LeafletMap
-          places={places}
+          places={places.filter(p => !p.geocodeFailed)}
           selectedIds={selectedIds}
           alwaysShow={showFavourites ? savedPlaces : []}
           centerTrigger={favCenterTrigger}

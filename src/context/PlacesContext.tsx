@@ -25,6 +25,8 @@ export interface Place {
   lat: number;
   lng: number;
   distanceMiles?: number;
+  geocodeFailed?: boolean;  // true when Nominatim could not locate this place
+  failReason?: string;      // human-readable reason for the geocode failure
 }
 
 const STORAGE_KEY = 'kids-places:saved';
