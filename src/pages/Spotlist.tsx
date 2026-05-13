@@ -17,10 +17,12 @@ import {
   MapPin,
   Globe,
   Map,
+  Pencil,
 } from 'lucide-react';
 import { useSpotlist, SpotlistEntry } from '../context/SpotlistContext';
 import { usePlaces } from '../context/PlacesContext';
 import { cn } from '../lib/cn';
+import EditPlaceModal from '../components/EditPlaceModal';
 
 // ── Category colour map ──────────────────────────────────────────────────────
 
@@ -47,10 +49,11 @@ interface SpotCardProps {
   onToggleVisited: (id: string) => void;
   onToggleSaved: (entry: SpotlistEntry) => void;
   onShowInMap: (entry: SpotlistEntry) => void;
+  onEdit: (entry: SpotlistEntry) => void;
   isSaved: boolean;
 }
 
-function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, onShowInMap, isSaved }: SpotCardProps) {
+function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, onShowInMap, onEdit, isSaved }: SpotCardProps) {
   const catStyle = getCategoryStyle(entry.category);
   const addedDate = new Date(entry.addedAt).toLocaleDateString('en-GB', {
     day: 'numeric',
@@ -195,6 +198,15 @@ function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, onShowInMap
         </button>
 
         <button
+          onClick={() => onEdit(entry)}
+          aria-label="Edit place"
+          title="Edit place"
+          className="w-9 h-9 flex items-center justify-center rounded-full border border-outline-variant/20 text-on-surface-variant hover:bg-primary/10 hover:text-primary transition-colors"
+        >
+          <Pencil className="w-4 h-4" />
+        </button>
+
+        <button
           onClick={() => onRemove(entry.id)}
           aria-label="Remove from Spotlist"
           className="w-9 h-9 flex items-center justify-center rounded-full border border-outline-variant/20 text-on-surface-variant hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors"
@@ -209,12 +221,13 @@ function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, onShowInMap
 // ── Spotlist page ─────────────────────────────────────────────────────────────
 
 export default function Spotlist() {
-  const { spotlist, removeFromSpotlist, toggleVisited, clearSpotlist } = useSpotlist();
+  const { spotlist, removeFromSpotlist, toggleVisited, clearSpotlist, updateSpotlistEntry } = useSpotlist();
   const { savePlace, unsavePlace, isSaved } = usePlaces();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [showConfirmClear, setShowConfirmClear] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<SpotlistEntry | null>(null);
 
   const categories = useMemo(() => {
     const cats = new Set(spotlist.map((e) => e.category).filter(Boolean));
@@ -353,6 +366,7 @@ export default function Spotlist() {
               onToggleVisited={toggleVisited}
               onToggleSaved={handleToggleSaved}
               onShowInMap={(e) => navigate('/map-editor', { state: { spotlightPlace: e } })}
+              onEdit={setEditingEntry}
               isSaved={isSaved(entry)}
             />
           ))}
@@ -387,6 +401,14 @@ export default function Spotlist() {
             </div>
           </div>
         </div>
+      )}
+
+      {editingEntry && (
+        <EditPlaceModal
+          place={editingEntry}
+          onSave={updateSpotlistEntry}
+          onClose={() => setEditingEntry(null)}
+        />
       )}
     </div>
   );

@@ -74,6 +74,7 @@ interface SpotlistContextValue {
   addBatchToSpotlist: (places: Place[]) => void;
   removeFromSpotlist: (id: string) => void;
   toggleVisited: (id: string) => void;
+  updateSpotlistEntry: (entry: SpotlistEntry) => void;
   isInSpotlist: (place: { id: string; postcode?: string; lat: number; lng: number }) => boolean;
   clearSpotlist: () => void;
 }
@@ -165,6 +166,17 @@ export function SpotlistProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const updateSpotlistEntry = useCallback((entry: SpotlistEntry) => {
+    setSpotlist((prev) => {
+      const next = prev.map((e) => (e.id === entry.id ? entry : e));
+      saveLocal(next);
+      supabase?.from('spotlist').update(toRow(entry)).eq('id', entry.id).then(({ error }) => {
+        if (error) console.error('[Supabase] spotlist update error:', error.message);
+      });
+      return next;
+    });
+  }, []);
+
   const isInSpotlist = useCallback(
     (place: { id: string; postcode?: string; lat: number; lng: number }) =>
       spotlist.some(
@@ -194,7 +206,7 @@ export function SpotlistProvider({ children }: { children: ReactNode }) {
 
   return (
     <SpotlistContext.Provider
-      value={{ spotlist, addToSpotlist, addBatchToSpotlist, removeFromSpotlist, toggleVisited, isInSpotlist, clearSpotlist }}
+      value={{ spotlist, addToSpotlist, addBatchToSpotlist, removeFromSpotlist, toggleVisited, updateSpotlistEntry, isInSpotlist, clearSpotlist }}
     >
       {children}
     </SpotlistContext.Provider>

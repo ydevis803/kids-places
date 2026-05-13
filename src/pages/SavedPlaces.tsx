@@ -2,13 +2,17 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Globe, Heart, Map, MapPin, Navigation, Route, Sun } from 'lucide-react';
+import { useState } from 'react';
+import { Globe, Heart, Map, MapPin, Navigation, Route, Sun, Pencil } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { usePlaces } from '../context/PlacesContext';
+import type { Place } from '../context/PlacesContext';
+import EditPlaceModal from '../components/EditPlaceModal';
 
 export default function SavedPlaces() {
-  const { savedPlaces, unsavePlace } = usePlaces();
+  const { savedPlaces, unsavePlace, updatePlace } = usePlaces();
   const navigate = useNavigate();
+  const [editingPlace, setEditingPlace] = useState<Place | null>(null);
 
   if (savedPlaces.length === 0) {
     return (
@@ -124,6 +128,15 @@ export default function SavedPlaces() {
               </a>
 
               <button
+                onClick={() => setEditingPlace(place)}
+                aria-label="Edit place"
+                title="Edit place"
+                className="w-9 h-9 flex items-center justify-center rounded-full transition-colors border text-on-surface-variant hover:bg-primary/10 hover:text-primary border-outline-variant/20"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+
+              <button
                 onClick={() => unsavePlace(place.id)}
                 aria-label="Remove from saved"
                 className="w-9 h-9 flex items-center justify-center rounded-full bg-secondary-container text-on-secondary-container hover:bg-secondary-container/70 transition-colors border border-secondary-container"
@@ -139,6 +152,14 @@ export default function SavedPlaces() {
           </article>
         ))}
       </div>
+
+      {editingPlace && (
+        <EditPlaceModal
+          place={editingPlace}
+          onSave={updatePlace}
+          onClose={() => setEditingPlace(null)}
+        />
+      )}
     </div>
   );
 }

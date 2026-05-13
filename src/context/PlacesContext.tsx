@@ -80,6 +80,7 @@ interface PlacesContextValue {
   savedPlaces: Place[];
   savePlace: (place: Place) => void;
   unsavePlace: (id: string) => void;
+  updatePlace: (place: Place) => void;
   isSaved: (place: { id: string; postcode?: string; lat: number; lng: number }) => boolean;
 }
 
@@ -139,6 +140,18 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const updatePlace = useCallback((place: Place) => {
+    setSavedPlaces((prev) => {
+      const next = prev.map((p) => (p.id === place.id ? place : p));
+      saveLocal(next);
+      // Update in Supabase (fire-and-forget)
+      supabase?.from('saved_places').update(toRow(place)).eq('id', place.id).then(({ error }) => {
+        if (error) console.error('[Supabase] update error:', error.message);
+      });
+      return next;
+    });
+  }, []);
+
   const isSaved = useCallback(
     (place: { id: string; postcode?: string; lat: number; lng: number }) =>
       savedPlaces.some(
@@ -154,7 +167,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <PlacesContext.Provider value={{ savedPlaces, savePlace, unsavePlace, isSaved }}>
+    <PlacesContext.Provider value={{ savedPlaces, savePlace, unsavePlace, updatePlace, isSaved }}>
       {children}
     </PlacesContext.Provider>
   );

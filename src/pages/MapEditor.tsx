@@ -30,6 +30,7 @@ import {
   AlertTriangle,
   BookmarkPlus,
   BookmarkCheck,
+  Pencil,
 } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 import { GoogleGenAI } from '@google/genai';
@@ -37,6 +38,7 @@ import { usePlaces } from '../context/PlacesContext';
 import type { Place } from '../context/PlacesContext';
 import { useSpotlist } from '../context/SpotlistContext';
 import LeafletMap from '../components/LeafletMap';
+import EditPlaceModal from '../components/EditPlaceModal';
 import { getEnv } from '../lib/env';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -542,10 +544,11 @@ interface PlaceCardProps {
   place: Place;
   selected: boolean;
   onToggleSelect: (id: string) => void;
+  onEdit: (place: Place) => void;
   hideMapToggle?: boolean;
 }
 
-function PlaceCard({ place, selected, onToggleSelect, hideMapToggle = false }: PlaceCardProps) {
+function PlaceCard({ place, selected, onToggleSelect, onEdit, hideMapToggle = false }: PlaceCardProps) {
   const { savePlace, unsavePlace, isSaved } = usePlaces();
   const { addToSpotlist, removeFromSpotlist, isInSpotlist } = useSpotlist();
   const saved = isSaved(place);
@@ -656,6 +659,15 @@ function PlaceCard({ place, selected, onToggleSelect, hideMapToggle = false }: P
           {inSpotlist
             ? <BookmarkCheck className="w-4 h-4 fill-current" />
             : <BookmarkPlus className="w-4 h-4" />}
+        </button>
+
+        <button
+          onClick={() => onEdit(place)}
+          aria-label="Edit place"
+          title="Edit place"
+          className="w-9 h-9 flex items-center justify-center rounded-full transition-colors border text-on-surface-variant hover:bg-primary/10 hover:text-primary border-outline-variant/20"
+        >
+          <Pencil className="w-4 h-4" />
         </button>
 
         <button
@@ -779,7 +791,8 @@ export default function MapEditor() {
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { savedPlaces } = usePlaces();
-  const { addToSpotlist, addBatchToSpotlist } = useSpotlist();
+  const { addToSpotlist, addBatchToSpotlist, updateSpotlistEntry, isInSpotlist } = useSpotlist();
+  const [editingPlace, setEditingPlace] = useState<Place | null>(null);
 
   // ── Auto-trigger when arriving from Discover with a pre-filled query ─────────
   useEffect(() => {
@@ -922,6 +935,15 @@ export default function MapEditor() {
       return next;
     });
   }, []);
+
+  const handleEditPlace = useCallback((updated: Place) => {
+    // Update in extracted places list
+    setPlaces((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    // If in spotlist, update there
+    if (isInSpotlist(updated)) {
+      updateSpotlistEntry({ ...updated, addedAt: new Date().toISOString(), visited: false });
+    }
+  }, [isInSpotlist, updateSpotlistEntry]);
 
   const selectAll = () => setSelectedIds(new Set(places.filter(p => !p.geocodeFailed).map((p) => p.id)));
   const clearAll = () => setSelectedIds(new Set());
@@ -1153,7 +1175,7 @@ export default function MapEditor() {
                 </div>
               )}
               {places.map((place) => (
-                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} />
+                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} onEdit={handleEditPlace} />
               ))}
             </section>
           )}
@@ -1171,7 +1193,7 @@ export default function MapEditor() {
                 </span>
               </div>
               {savedPlaces.map((place) => (
-                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} hideMapToggle />
+                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} onEdit={handleEditPlace} hideMapToggle />
               ))}
             </section>
           )}
@@ -1251,6 +1273,14 @@ export default function MapEditor() {
           </div>
         )}
       </main>
+
+      {editingPlace && (
+        <EditPlaceModal
+          place={editingPlace}
+          onSave={handleEditPlace}
+          onClose={() => setEditingPlace(null)}
+        />
+      )}
     </div>
     </>
   );
