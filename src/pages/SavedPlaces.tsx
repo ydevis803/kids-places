@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Heart, MapPin, Navigation, Route, Sun } from 'lucide-react';
+import { Globe, Heart, MapPin, Navigation, Route, Sun } from 'lucide-react';
 import { usePlaces } from '../context/PlacesContext';
 
 export default function SavedPlaces() {
@@ -86,12 +86,29 @@ export default function SavedPlaces() {
               )}
             </div>
 
-            <div className="flex gap-3 mt-auto items-center pt-1">
+            <div className="flex gap-2 mt-auto items-center pt-1">
+              <a
+                href={place.website ?? `https://www.google.com/search?q=${encodeURIComponent(place.name)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={place.website ? 'Visit website' : 'Search on Google'}
+                title={place.website ? place.website : `Search "${place.name}" on Google`}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors border ${
+                  place.website
+                    ? 'bg-primary-container text-on-primary-container border-primary/20 hover:bg-primary/10'
+                    : 'text-on-surface-variant hover:bg-surface-container-high border-outline-variant/20'
+                }`}
+              >
+                <Globe className="w-4 h-4" />
+              </a>
+
               <a
                 href={`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 py-2.5 text-sm font-label font-semibold bg-surface-container text-on-surface hover:bg-surface-container-high rounded-xl transition-colors flex items-center justify-center gap-2"
+                aria-label="Get directions"
+                title="Get directions"
+                className="flex-1 py-2 text-sm font-label font-semibold bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors rounded-xl flex items-center justify-center gap-2 border border-outline-variant/20"
               >
                 <Navigation className="w-4 h-4" /> Directions
               </a>

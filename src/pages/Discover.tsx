@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Flame, ToyBrick, TreePalm, GraduationCap, Coffee, Waves, FileText, Star, List, Utensils, RefreshCw, MapPin, Sparkles, ExternalLink, ChevronDown } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
+import { getEnv } from '../lib/env';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface TrendingPlace {
@@ -76,9 +77,9 @@ function tagIcon(tag: string) {
 
 // Option 3: Scrape Days Out With The Kids blog via ScrapingBee → structure with Gemini
 async function fetchGuidesFromScrape(): Promise<Guide[]> {
-  const sbKey: string = process.env.SCRAPINGBEE_API_KEY || '';
+  const sbKey = getEnv('SCRAPINGBEE_API_KEY');
   if (!sbKey) throw new Error('No ScrapingBee key');
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getEnv('GEMINI_API_KEY');
   if (!apiKey) throw new Error('No Gemini key');
 
   const targetUrl = 'https://www.dayoutwiththekids.co.uk/blog/';
@@ -130,7 +131,7 @@ async function fetchGuidesFromScrape(): Promise<Guide[]> {
 
 // Option 1: Pure Gemini generation — used as fallback when scraping fails
 async function fetchGuidesGemini(): Promise<Guide[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getEnv('GEMINI_API_KEY');
   if (!apiKey) return [];
   const ai = new GoogleGenAI({ apiKey });
   const monthYear = new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
@@ -169,7 +170,7 @@ async function fetchGuides(): Promise<{ guides: Guide[]; source: 'scraped' | 'ai
 
 // ── Gemini fetch ───────────────────────────────────────────────────────────────
 async function fetchTrending(): Promise<TrendingPlace[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getEnv('GEMINI_API_KEY');
   if (!apiKey) return [];
   const now = new Date();
   const monthYear = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });

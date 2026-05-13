@@ -1,11 +1,12 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Compass, Home, Map as MapIcon, Heart, User, FolderHeart } from 'lucide-react';
+import { Compass, Home, Map as MapIcon, Heart, User, FolderHeart, ListChecks } from 'lucide-react';
 import { cn } from '../lib/cn';
 
 export default function Layout() {
   const navItems = [
     { name: 'Home', path: '/', icon: Home },
     { name: 'Map Editor', path: '/map-editor', icon: MapIcon },
+    { name: 'The Spotlist', path: '/spotlist', icon: ListChecks },
     { name: 'Collections', path: '/collections', icon: FolderHeart },
     { name: 'Saved Places', path: '/saved', icon: Heart },
     { name: 'Account', path: '/account', icon: User },

@@ -21,18 +21,23 @@ import {
   LocateFixed,
   Compass,
   Heart,
-  Check,
+  Binoculars,
+  Globe,
   X,
   Loader2,
   ExternalLink,
   ClipboardPaste,
   AlertTriangle,
+  BookmarkPlus,
+  BookmarkCheck,
 } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 import { GoogleGenAI } from '@google/genai';
 import { usePlaces } from '../context/PlacesContext';
 import type { Place } from '../context/PlacesContext';
+import { useSpotlist } from '../context/SpotlistContext';
 import LeafletMap from '../components/LeafletMap';
+import { getEnv } from '../lib/env';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -76,6 +81,24 @@ async function nominatimLookup(query: string): Promise<{ lat: number; lng: numbe
   }
 }
 
+async function mapsCoLookup(query: string): Promise<{ lat: number; lng: number; geocodedName?: string } | null> {
+  try {
+    const res = await fetch(
+      `https://geocode.maps.co/search?q=${encodeURIComponent(query)}&limit=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const data = await res.json() as Array<{ lat: string; lon: string; display_name?: string }>;
+    if (!data[0]) return null;
+    return {
+      lat: parseFloat(data[0].lat),
+      lng: parseFloat(data[0].lon),
+      geocodedName: data[0].display_name?.split(',')[0]?.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Delay helper to respect Nominatim's 1 req/sec rate limit. */
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -88,6 +111,16 @@ function extractUKPostcode(s: string): string | undefined {
 /** Remove an embedded UK postcode from a place name. */
 function stripPostcodeFromName(name: string): string {
   return name.replace(UK_POSTCODE_RE, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+function normalizePlaceName(name: string): string {
+  return name
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/[@#][\w-]+/g, ' ')
+    .replace(/[|]/g, ' ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 // ─── Extraction debug tracker (reset before each run) ────────────────────────
@@ -105,7 +138,7 @@ async function geocodeName(name: string, postcode?: string): Promise<{ lat: numb
   // Extract a postcode embedded in the name (e.g. "Mizens Railway GU21 2JW") if not provided separately
   const embeddedPostcode = extractUKPostcode(name);
   const resolvedPostcode = postcode ?? embeddedPostcode;
-  const cleanName = embeddedPostcode ? stripPostcodeFromName(name) : name;
+  const cleanName = normalizePlaceName(embeddedPostcode ? stripPostcodeFromName(name) : name);
 
   // Step 1: name + postcode (only when postcode is available)
   if (resolvedPostcode) {
@@ -130,6 +163,16 @@ async function geocodeName(name: string, postcode?: string): Promise<{ lat: numb
     if (result) return { ...result, geocodedName: resolvedPostcode };
     await sleep(1100);
   }
+
+  // Step 5: fallback provider with the same query strategy
+  if (resolvedPostcode) {
+    const withPc = await mapsCoLookup(`${cleanName} ${resolvedPostcode}`);
+    if (withPc) return withPc;
+  }
+  const ukFallback = await mapsCoLookup(`${cleanName}, UK`);
+  if (ukFallback) return ukFallback;
+  const bareFallback = await mapsCoLookup(cleanName);
+  if (bareFallback) return bareFallback;
 
   return null;
 }
@@ -163,7 +206,7 @@ function isSocialUrl(url: string): boolean {
 async function fetchSocialText(url: string): Promise<string> {
   const parts: string[] = [];
   const host = new URL(url).hostname.replace(/^www\./, '');
-  const sbKey: string = process.env.SCRAPINGBEE_API_KEY || '';
+  const sbKey = getEnv('SCRAPINGBEE_API_KEY');
 
   // 1. ScrapingBee — routed via allorigins to avoid browser CORS restrictions.
   //    ScrapingBee is a server-side API; direct browser fetch is blocked by CORS,
@@ -317,7 +360,7 @@ Rules:
 - Return at most 20 places.`;
 
 async function searchPlacesByQuery(query: string): Promise<Place[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getEnv('GEMINI_API_KEY');
   if (!apiKey) return [];
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
@@ -410,7 +453,7 @@ async function parseGeminiPlaces(raw: string): Promise<Place[]> {
       if (!price) price = await enrichPriceFromOSM(coords.lat, coords.lng);
 
       // Source 4: Fetch the place's own website and let Gemini read its pricing page
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = getEnv('GEMINI_API_KEY');
       if (!price && coords.website && apiKey) {
         price = await enrichPriceFromWebsite(coords.website, apiKey, item.name);
       }
@@ -435,7 +478,7 @@ async function callGemini(apiKey: string, text: string): Promise<Place[]> {
 }
 
 async function extractPlacesFromText(input: string): Promise<Place[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getEnv('GEMINI_API_KEY');
   const trimmed = input.trim();
   const url = isUrl(trimmed) ? trimmed : null;
 
@@ -450,7 +493,10 @@ async function extractPlacesFromText(input: string): Promise<Place[]> {
       err.socialUrl = url;
       throw err;
     }
-    if (!apiKey) return extractFromPlainText(socialText);
+    if (!apiKey) {
+      _debug.failed.push({ name: 'Gemini API', reason: 'GEMINI_API_KEY is not configured' });
+      return extractFromPlainText(socialText);
+    }
     const places = await callGemini(apiKey, socialText);
     if (places.length === 0) {
       const err = new Error('__SOCIAL_LOGIN_REQUIRED__') as Error & { socialUrl: string };
@@ -463,12 +509,18 @@ async function extractPlacesFromText(input: string): Promise<Place[]> {
   // ── Regular article / blog URL ─────────────────────────────────────────────
   if (url) {
     const text = await fetchArticleText(url);
-    if (!apiKey) return extractFromPlainText(text);
+    if (!apiKey) {
+      _debug.failed.push({ name: 'Gemini API', reason: 'GEMINI_API_KEY is not configured' });
+      return extractFromPlainText(text);
+    }
     return callGemini(apiKey, text);
   }
 
   // ── Plain text / caption ───────────────────────────────────────────────────
-  if (!apiKey) return extractFromPlainText(trimmed);
+  if (!apiKey) {
+    _debug.failed.push({ name: 'Gemini API', reason: 'GEMINI_API_KEY is not configured' });
+    return extractFromPlainText(trimmed);
+  }
   return callGemini(apiKey, trimmed);
 }
 
@@ -494,7 +546,9 @@ interface PlaceCardProps {
 
 function PlaceCard({ place, selected, onToggleSelect }: PlaceCardProps) {
   const { savePlace, unsavePlace, isSaved } = usePlaces();
-  const saved = isSaved(place.id);
+  const { addToSpotlist, removeFromSpotlist, isInSpotlist } = useSpotlist();
+  const saved = isSaved(place);
+  const inSpotlist = isInSpotlist(place);
 
   // Silently omit any place that couldn't be located — never render a card for it
   if (place.geocodeFailed) return null;
@@ -546,27 +600,60 @@ function PlaceCard({ place, selected, onToggleSelect }: PlaceCardProps) {
         )}
       </div>
 
-      <div className="flex gap-3 mt-auto items-center">
+      <div className="flex gap-2 mt-auto items-center">
         <button
           onClick={() => onToggleSelect(place.id)}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-label font-semibold transition-colors border ${
+          aria-label={selected ? 'Remove from map' : 'Add to map'}
+          title={selected ? 'Remove from map' : 'Add to map'}
+          className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors border ${
             selected
               ? 'bg-primary text-on-primary border-primary'
               : 'text-primary hover:bg-primary/5 border-primary/20'
           }`}
         >
-          {selected ? <Check className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
-          {selected ? 'On Map' : 'Add to Map'}
+          {selected ? <Binoculars className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
         </button>
+
+        <a
+          href={place.website ?? `https://www.google.com/search?q=${encodeURIComponent(place.name)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={place.website ? 'Visit website' : 'Search on Google'}
+          title={place.website ? place.website : `Search "${place.name}" on Google`}
+          className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors border ${
+            place.website
+              ? 'bg-primary-container text-on-primary-container border-primary/20 hover:bg-primary/10'
+              : 'text-on-surface-variant hover:bg-surface-container-high border-outline-variant/20'
+          }`}
+        >
+          <Globe className="w-4 h-4" />
+        </a>
 
         <a
           href={`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-1 py-2 text-sm font-label font-semibold bg-surface-container text-on-surface hover:bg-surface-container-high rounded-xl transition-colors flex items-center justify-center gap-2"
+          aria-label="Get directions"
+          title="Get directions"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors border border-outline-variant/20"
         >
-          <Navigation className="w-4 h-4" /> Directions
+          <Navigation className="w-4 h-4" />
         </a>
+
+        <button
+          onClick={() => (inSpotlist ? removeFromSpotlist(place.id) : addToSpotlist(place))}
+          aria-label={inSpotlist ? 'Remove from Spotlist' : 'Add to Spotlist'}
+          title={inSpotlist ? 'Remove from Spotlist' : 'Add to Spotlist'}
+          className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors border ${
+            inSpotlist
+              ? 'bg-tertiary-container text-on-tertiary-container border-tertiary-container'
+              : 'text-on-surface-variant hover:bg-surface-container-high border-outline-variant/20'
+          }`}
+        >
+          {inSpotlist
+            ? <BookmarkCheck className="w-4 h-4 fill-current" />
+            : <BookmarkPlus className="w-4 h-4" />}
+        </button>
 
         <button
           onClick={() => (saved ? unsavePlace(place.id) : savePlace(place))}
@@ -677,7 +764,7 @@ export default function MapEditor() {
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [sortingDistance, setSortingDistance] = useState(false);
   const [socialHelper, setSocialHelper] = useState<string | null>(null);
-  const [showFavourites, setShowFavourites] = useState(true);
+  const [showFavourites, setShowFavourites] = useState(false);
   const [favCenterTrigger, setFavCenterTrigger] = useState(0);
   const [mobileTab, setMobileTab] = useState<'list' | 'map'>('list');
   const [extractionDebug, setExtractionDebug] = useState<{
@@ -687,6 +774,7 @@ export default function MapEditor() {
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { savedPlaces } = usePlaces();
+  const { addToSpotlist, addBatchToSpotlist } = useSpotlist();
 
   // ── Auto-trigger when arriving from Discover with a pre-filled query ─────────
   useEffect(() => {
@@ -737,6 +825,7 @@ export default function MapEditor() {
           };
           setPlaces([pin]);
           setSelectedIds(new Set([pin.id]));
+          addToSpotlist(pin);
         } else {
           setError(`Could not locate "${trimmedInput}" on the map.`);
         }
@@ -749,6 +838,7 @@ export default function MapEditor() {
       if (extracted.length) {
         setPlaces(extracted);
         setSelectedIds(new Set(extracted.filter(p => !p.geocodeFailed).map((p) => p.id)));
+        addBatchToSpotlist(extracted);
       } else {
         setError('No places found. Make sure the text contains specific place names, or include a postcode alongside the name.');
       }
@@ -763,7 +853,7 @@ export default function MapEditor() {
     } finally {
       setLoading(false);
     }
-  }, [input]);
+  }, [input, addToSpotlist, addBatchToSpotlist]);
 
   const handleSocialPaste = useCallback(async (text: string) => {
     setSocialHelper(null);
@@ -780,13 +870,14 @@ export default function MapEditor() {
       } else {
         setPlaces(extracted);
         setSelectedIds(new Set(extracted.filter(p => !p.geocodeFailed).map((p) => p.id)));
+        addBatchToSpotlist(extracted);
       }
     } catch (e) {
       setError((e as Error).message ?? 'Extraction failed.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [addBatchToSpotlist]);
 
   // ── Screenshot upload → OCR → extract ──────────────────────────────────────
   const handleFileUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
@@ -807,6 +898,7 @@ export default function MapEditor() {
       } else {
         setPlaces(extracted);
         setSelectedIds(new Set(extracted.map((p) => p.id)));
+        addBatchToSpotlist(extracted);
       }
     } catch (err) {
       setError((err as Error).message ?? 'Screenshot processing failed.');
@@ -815,7 +907,7 @@ export default function MapEditor() {
       setLoading(false);
       e.target.value = '';
     }
-  }, []);
+  }, [addBatchToSpotlist]);
 
   // ── Map selection ───────────────────────────────────────────────────────────
   const toggleSelect = useCallback((id: string) => {

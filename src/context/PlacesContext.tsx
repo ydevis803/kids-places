@@ -22,6 +22,7 @@ export interface Place {
   outdoor?: boolean;
   postcode?: string;
   geocodedName?: string;  // official name returned by Nominatim, may differ from extracted name
+  website?: string;        // venue website (from OSM extratags or manual entry)
   lat: number;
   lng: number;
   distanceMiles?: number;
@@ -53,6 +54,7 @@ function toPlace(row: Record<string, unknown>): Place {
     ageGroup:     row.age_group != null ? String(row.age_group) : undefined,
     outdoor:      row.outdoor != null ? Boolean(row.outdoor) : undefined,
     postcode:     row.postcode != null ? String(row.postcode) : undefined,
+    website:      row.website != null ? String(row.website) : undefined,
     lat:          Number(row.lat),
     lng:          Number(row.lng),
   };
@@ -67,6 +69,7 @@ function toRow(p: Place) {
     age_group:   p.ageGroup ?? null,
     outdoor:     p.outdoor ?? null,
     postcode:    p.postcode ?? null,
+    website:     p.website ?? null,
     lat:         p.lat,
     lng:         p.lng,
   };
@@ -77,7 +80,7 @@ interface PlacesContextValue {
   savedPlaces: Place[];
   savePlace: (place: Place) => void;
   unsavePlace: (id: string) => void;
-  isSaved: (id: string) => boolean;
+  isSaved: (place: { id: string; postcode?: string; lat: number; lng: number }) => boolean;
 }
 
 const PlacesContext = createContext<PlacesContextValue | null>(null);
@@ -137,7 +140,16 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isSaved = useCallback(
-    (id: string) => savedPlaces.some((p) => p.id === id),
+    (place: { id: string; postcode?: string; lat: number; lng: number }) =>
+      savedPlaces.some(
+        (p) =>
+          p.id === place.id ||
+          (place.postcode &&
+            p.postcode &&
+            p.postcode.replace(/\s/g, '').toLowerCase() ===
+              place.postcode.replace(/\s/g, '').toLowerCase()) ||
+          (Math.abs(p.lat - place.lat) < 0.0005 && Math.abs(p.lng - place.lng) < 0.0005)
+      ),
     [savedPlaces]
   );
 
