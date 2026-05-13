@@ -2,11 +2,13 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Globe, Heart, MapPin, Navigation, Route, Sun } from 'lucide-react';
+import { Globe, Heart, Map, MapPin, Navigation, Route, Sun } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { usePlaces } from '../context/PlacesContext';
 
 export default function SavedPlaces() {
   const { savedPlaces, unsavePlace } = usePlaces();
+  const navigate = useNavigate();
 
   if (savedPlaces.length === 0) {
     return (
@@ -87,6 +89,14 @@ export default function SavedPlaces() {
             </div>
 
             <div className="flex gap-2 mt-auto items-center pt-1">
+              <button
+                onClick={() => navigate('/map-editor', { state: { spotlightPlace: place } })}
+                aria-label="Show in map"
+                title="Show in map"
+                className="w-9 h-9 flex items-center justify-center rounded-full transition-colors border text-on-surface-variant hover:bg-primary/10 hover:text-primary border-outline-variant/20"
+              >
+                <Map className="w-4 h-4" />
+              </button>
               <a
                 href={place.website ?? `https://www.google.com/search?q=${encodeURIComponent(place.name)}`}
                 target="_blank"

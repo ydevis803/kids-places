@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ListChecks,
   Navigation,
@@ -15,6 +16,7 @@ import {
   Trash2,
   MapPin,
   Globe,
+  Map,
 } from 'lucide-react';
 import { useSpotlist, SpotlistEntry } from '../context/SpotlistContext';
 import { usePlaces } from '../context/PlacesContext';
@@ -44,10 +46,11 @@ interface SpotCardProps {
   onRemove: (id: string) => void;
   onToggleVisited: (id: string) => void;
   onToggleSaved: (entry: SpotlistEntry) => void;
+  onShowInMap: (entry: SpotlistEntry) => void;
   isSaved: boolean;
 }
 
-function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, isSaved }: SpotCardProps) {
+function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, onShowInMap, isSaved }: SpotCardProps) {
   const catStyle = getCategoryStyle(entry.category);
   const addedDate = new Date(entry.addedAt).toLocaleDateString('en-GB', {
     day: 'numeric',
@@ -143,6 +146,14 @@ function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, isSaved }: 
 
       {/* Actions */}
       <div className="flex gap-2 items-center mt-auto pt-2 border-t border-outline-variant/10">
+        <button
+          onClick={() => onShowInMap(entry)}
+          aria-label="Show in map"
+          title="Show in map"
+          className="w-9 h-9 flex items-center justify-center rounded-full transition-colors border text-on-surface-variant hover:bg-primary/10 hover:text-primary border-outline-variant/20"
+        >
+          <Map className="w-4 h-4" />
+        </button>
         <a
           href={entry.website ?? `https://www.google.com/search?q=${encodeURIComponent(entry.name)}`}
           target="_blank"
@@ -165,9 +176,9 @@ function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, isSaved }: 
           rel="noopener noreferrer"
           aria-label="Get directions"
           title="Get directions"
-          className="flex-1 py-2 text-sm font-label font-semibold bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors rounded-xl flex items-center justify-center gap-1.5 border border-outline-variant/20"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors border border-outline-variant/20"
         >
-          <Navigation className="w-3.5 h-3.5" /> Directions
+          <Navigation className="w-4 h-4" />
         </a>
 
         <button
@@ -200,6 +211,7 @@ function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, isSaved }: 
 export default function Spotlist() {
   const { spotlist, removeFromSpotlist, toggleVisited, clearSpotlist } = useSpotlist();
   const { savePlace, unsavePlace, isSaved } = usePlaces();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [showConfirmClear, setShowConfirmClear] = useState(false);
@@ -340,6 +352,7 @@ export default function Spotlist() {
               onRemove={removeFromSpotlist}
               onToggleVisited={toggleVisited}
               onToggleSaved={handleToggleSaved}
+              onShowInMap={(e) => navigate('/map-editor', { state: { spotlightPlace: e } })}
               isSaved={isSaved(entry)}
             />
           ))}

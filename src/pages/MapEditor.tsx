@@ -757,10 +757,11 @@ function SocialCaptionHelper({
 
 export default function MapEditor() {
   const location = useLocation();
-  const prefill = (location.state as { prefillText?: string } | null)?.prefillText ?? '';
+  const prefill = (location.state as { prefillText?: string; spotlightPlace?: Place } | null)?.prefillText ?? '';
+  const spotlightFromNav = (location.state as { prefillText?: string; spotlightPlace?: Place } | null)?.spotlightPlace ?? null;
   const [input, setInput] = useState(prefill);
-  const [places, setPlaces] = useState<Place[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [places, setPlaces] = useState<Place[]>(spotlightFromNav ? [spotlightFromNav] : []);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(spotlightFromNav ? new Set([spotlightFromNav.id]) : new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [postcode, setPostcode] = useState('');
@@ -768,7 +769,8 @@ export default function MapEditor() {
   const [sortingDistance, setSortingDistance] = useState(false);
   const [socialHelper, setSocialHelper] = useState<string | null>(null);
   const [showFavourites, setShowFavourites] = useState(false);
-  const [favCenterTrigger, setFavCenterTrigger] = useState(0);
+  const [mapCenterTrigger, setMapCenterTrigger] = useState(spotlightFromNav ? 1 : 0);
+  const [mapCenterPlaces, setMapCenterPlaces] = useState<Place[]>(spotlightFromNav ? [spotlightFromNav] : []);
   const [mobileTab, setMobileTab] = useState<'list' | 'map'>('list');
   const [extractionDebug, setExtractionDebug] = useState<{
     geminiCount: number;
@@ -1084,7 +1086,10 @@ export default function MapEditor() {
             <button
               onClick={() => {
                 setShowFavourites((prev) => {
-                  if (!prev) setFavCenterTrigger((t) => t + 1);
+                  if (!prev) {
+                    setMapCenterPlaces(savedPlaces);
+                    setMapCenterTrigger((t) => t + 1);
+                  }
                   return !prev;
                 });
               }}
@@ -1191,8 +1196,8 @@ export default function MapEditor() {
           places={places.filter(p => !p.geocodeFailed)}
           selectedIds={selectedIds}
           alwaysShow={showFavourites ? savedPlaces : []}
-          centerTrigger={favCenterTrigger}
-          centerPlaces={savedPlaces}
+          centerTrigger={mapCenterTrigger}
+          centerPlaces={mapCenterPlaces}
           userLat={userCoords?.lat}
           userLng={userCoords?.lng}
           onMarkerClick={(place) => toggleSelect(place.id)}
@@ -1202,7 +1207,10 @@ export default function MapEditor() {
           <button
             onClick={() => {
               setShowFavourites((prev) => {
-                if (!prev) setFavCenterTrigger((t) => t + 1);
+                if (!prev) {
+                  setMapCenterPlaces(savedPlaces);
+                  setMapCenterTrigger((t) => t + 1);
+                }
                 return !prev;
               });
             }}
