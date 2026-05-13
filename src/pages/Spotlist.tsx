@@ -222,12 +222,18 @@ function SpotCard({ entry, onRemove, onToggleVisited, onToggleSaved, onShowInMap
 
 export default function Spotlist() {
   const { spotlist, removeFromSpotlist, toggleVisited, clearSpotlist, updateSpotlistEntry } = useSpotlist();
-  const { savePlace, unsavePlace, isSaved } = usePlaces();
+  const { savePlace, unsavePlace, isSaved, updatePlace } = usePlaces();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [editingEntry, setEditingEntry] = useState<SpotlistEntry | null>(null);
+
+  const handleSave = (updated: Place) => {
+    const existingSpot = spotlist.find((e) => e.id === updated.id);
+    if (existingSpot) updateSpotlistEntry({ ...existingSpot, ...updated });
+    if (isSaved(updated)) updatePlace(updated);
+  };
 
   const categories = useMemo(() => {
     const cats = new Set(spotlist.map((e) => e.category).filter(Boolean));
@@ -406,7 +412,7 @@ export default function Spotlist() {
       {editingEntry && (
         <EditPlaceModal
           place={editingEntry}
-          onSave={updateSpotlistEntry}
+          onSave={handleSave}
           onClose={() => setEditingEntry(null)}
         />
       )}

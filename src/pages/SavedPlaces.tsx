@@ -7,12 +7,20 @@ import { Globe, Heart, Map, MapPin, Navigation, Route, Sun, Pencil } from 'lucid
 import { useNavigate } from 'react-router-dom';
 import { usePlaces } from '../context/PlacesContext';
 import type { Place } from '../context/PlacesContext';
+import { useSpotlist } from '../context/SpotlistContext';
 import EditPlaceModal from '../components/EditPlaceModal';
 
 export default function SavedPlaces() {
   const { savedPlaces, unsavePlace, updatePlace } = usePlaces();
+  const { spotlist, updateSpotlistEntry } = useSpotlist();
   const navigate = useNavigate();
   const [editingPlace, setEditingPlace] = useState<Place | null>(null);
+
+  const handleSave = (updated: Place) => {
+    updatePlace(updated);
+    const existingSpot = spotlist.find((e) => e.id === updated.id);
+    if (existingSpot) updateSpotlistEntry({ ...existingSpot, ...updated });
+  };
 
   if (savedPlaces.length === 0) {
     return (
@@ -124,7 +132,7 @@ export default function SavedPlaces() {
                 title="Get directions"
                 className="flex-1 py-2 text-sm font-label font-semibold bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors rounded-xl flex items-center justify-center gap-2 border border-outline-variant/20"
               >
-                <Navigation className="w-4 h-4" /> Directions
+                <Navigation className="w-4 h-4" />
               </a>
 
               <button
@@ -156,7 +164,7 @@ export default function SavedPlaces() {
       {editingPlace && (
         <EditPlaceModal
           place={editingPlace}
-          onSave={updatePlace}
+          onSave={handleSave}
           onClose={() => setEditingPlace(null)}
         />
       )}

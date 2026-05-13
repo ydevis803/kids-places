@@ -790,8 +790,8 @@ export default function MapEditor() {
     failed: { name: string; reason: string }[];
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const { savedPlaces } = usePlaces();
-  const { addToSpotlist, addBatchToSpotlist, updateSpotlistEntry, isInSpotlist } = useSpotlist();
+  const { savedPlaces, updatePlace, isSaved } = usePlaces();
+  const { addToSpotlist, addBatchToSpotlist, updateSpotlistEntry, isInSpotlist, spotlist } = useSpotlist();
   const [editingPlace, setEditingPlace] = useState<Place | null>(null);
 
   // ── Auto-trigger when arriving from Discover with a pre-filled query ─────────
@@ -939,11 +939,16 @@ export default function MapEditor() {
   const handleEditPlace = useCallback((updated: Place) => {
     // Update in extracted places list
     setPlaces((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    // If in spotlist, update there
-    if (isInSpotlist(updated)) {
-      updateSpotlistEntry({ ...updated, addedAt: new Date().toISOString(), visited: false });
+    // If in spotlist, update there (preserving addedAt & visited)
+    const existingSpot = spotlist.find((e) => e.id === updated.id);
+    if (existingSpot) {
+      updateSpotlistEntry({ ...existingSpot, ...updated });
     }
-  }, [isInSpotlist, updateSpotlistEntry]);
+    // If in saved places, update there
+    if (isSaved(updated)) {
+      updatePlace(updated);
+    }
+  }, [spotlist, isInSpotlist, updateSpotlistEntry, isSaved, updatePlace]);
 
   const selectAll = () => setSelectedIds(new Set(places.filter(p => !p.geocodeFailed).map((p) => p.id)));
   const clearAll = () => setSelectedIds(new Set());
@@ -1175,7 +1180,7 @@ export default function MapEditor() {
                 </div>
               )}
               {places.map((place) => (
-                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} onEdit={handleEditPlace} />
+                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} onEdit={setEditingPlace} />
               ))}
             </section>
           )}
@@ -1193,7 +1198,7 @@ export default function MapEditor() {
                 </span>
               </div>
               {savedPlaces.map((place) => (
-                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} onEdit={handleEditPlace} hideMapToggle />
+                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} onEdit={setEditingPlace} hideMapToggle />
               ))}
             </section>
           )}
