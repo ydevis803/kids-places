@@ -542,9 +542,10 @@ interface PlaceCardProps {
   place: Place;
   selected: boolean;
   onToggleSelect: (id: string) => void;
+  hideMapToggle?: boolean;
 }
 
-function PlaceCard({ place, selected, onToggleSelect }: PlaceCardProps) {
+function PlaceCard({ place, selected, onToggleSelect, hideMapToggle = false }: PlaceCardProps) {
   const { savePlace, unsavePlace, isSaved } = usePlaces();
   const { addToSpotlist, removeFromSpotlist, isInSpotlist } = useSpotlist();
   const saved = isSaved(place);
@@ -601,18 +602,20 @@ function PlaceCard({ place, selected, onToggleSelect }: PlaceCardProps) {
       </div>
 
       <div className="flex gap-2 mt-auto items-center">
-        <button
-          onClick={() => onToggleSelect(place.id)}
-          aria-label={selected ? 'Remove from map' : 'Add to map'}
-          title={selected ? 'Remove from map' : 'Add to map'}
-          className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors border ${
-            selected
-              ? 'bg-primary text-on-primary border-primary'
-              : 'text-primary hover:bg-primary/5 border-primary/20'
-          }`}
-        >
-          {selected ? <Binoculars className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
-        </button>
+        {!hideMapToggle && (
+          <button
+            onClick={() => onToggleSelect(place.id)}
+            aria-label={selected ? 'Remove from map' : 'Add to map'}
+            title={selected ? 'Remove from map' : 'Add to map'}
+            className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors border ${
+              selected
+                ? 'bg-primary text-on-primary border-primary'
+                : 'text-primary hover:bg-primary/5 border-primary/20'
+            }`}
+          >
+            {selected ? <Binoculars className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
+          </button>
+        )}
 
         <a
           href={place.website ?? `https://www.google.com/search?q=${encodeURIComponent(place.name)}`}
@@ -1150,8 +1153,26 @@ export default function MapEditor() {
             </section>
           )}
 
+          {/* Favourites section */}
+          {showFavourites && savedPlaces.length > 0 && (
+            <section className="flex flex-col gap-5 pb-8">
+              <div className="flex justify-between items-end mb-2">
+                <h2 className="text-xl font-headline font-bold text-on-surface tracking-tight flex items-center gap-2">
+                  <Heart className="w-5 h-5 fill-current text-secondary" />
+                  Favourites
+                </h2>
+                <span className="text-xs font-label text-on-surface-variant font-medium bg-surface-container-high px-2 py-1 rounded-md">
+                  {savedPlaces.length} saved
+                </span>
+              </div>
+              {savedPlaces.map((place) => (
+                <PlaceCard key={place.id} place={place} selected={selectedIds.has(place.id)} onToggleSelect={toggleSelect} hideMapToggle />
+              ))}
+            </section>
+          )}
+
           {/* Empty state */}
-          {!loading && places.length === 0 && (
+          {!loading && places.length === 0 && !showFavourites && (
             <div className="flex flex-col items-center justify-center gap-4 py-16 text-on-surface-variant">
               <Compass className="w-12 h-12 opacity-30" />
               <p className="text-sm font-body text-center max-w-xs">
