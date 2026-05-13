@@ -13,6 +13,7 @@ export default function EditPlaceModal({ place, onSave, onClose }: EditPlaceModa
   const [postcode, setPostcode] = useState(place.postcode ?? '');
   const [price, setPrice] = useState(place.price ?? '');
   const [ageGroup, setAgeGroup] = useState(place.ageGroup ?? '');
+  const [website, setWebsite] = useState(place.website ?? '');
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
@@ -24,6 +25,7 @@ export default function EditPlaceModal({ place, onSave, onClose }: EditPlaceModa
         postcode: postcode.trim() || undefined,
         price: price.trim() || undefined,
         ageGroup: ageGroup.trim() || undefined,
+        website: website.trim() || undefined,
       });
       onClose();
     } finally {
@@ -108,6 +110,22 @@ export default function EditPlaceModal({ place, onSave, onClose }: EditPlaceModa
               disabled={isSaving}
               className="px-4 py-2.5 rounded-lg border border-outline-variant/30 bg-surface-container text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors disabled:opacity-50"
               placeholder="e.g. 0-5 years"
+            />
+          </div>
+
+          {/* Website */}
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="website" className="text-sm font-label font-semibold text-on-surface">
+              Website URL
+            </label>
+            <input
+              id="website"
+              type="url"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              disabled={isSaving}
+              className="px-4 py-2.5 rounded-lg border border-outline-variant/30 bg-surface-container text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors disabled:opacity-50"
+              placeholder="https://example.com"
             />
           </div>
         </div>
