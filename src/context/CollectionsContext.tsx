@@ -18,12 +18,32 @@ export interface Collection {
 
 const COLLECTIONS_STORAGE_KEY = 'kids-places:collections';
 
-const EMOJIS = ['📍', '🗺️', '⭐', '🎯', '🌿', '🏖️', '🏰', '🎪', '🌟', '🧭', '🚀', '🌈'];
+const EMOJIS = ['🌧️', '🍔', '🦁', '🚂', '🎢', '🏛️', '🛝', '🏖️', '🏊', '🌿', '⭐', '🌈'];
+
+// Guess a fitting emoji from the collection name
+function guessEmoji(name: string): string {
+  const n = name.toLowerCase();
+  if (/train|rail|railway|steam|locomotive/.test(n))                  return '🚂';
+  if (/rain|wet|indoor|drizzle/.test(n))                              return '🌧️';
+  if (/pub|bar|food|eat|restaurant|lunch|dinner|café|cafe/.test(n))  return '🍔';
+  if (/farm|petting|barn|hay/.test(n))                                return '🐄';
+  if (/zoo|safari|wildlife|animal/.test(n))                           return '🦁';
+  if (/water.?park|pool|swim|splash|aqua/.test(n))                    return '🏊';
+  if (/theme.?park|roller.?coaster|thrill|adventure/.test(n))         return '🎢';
+  if (/museum|gallery|history|science|art/.test(n))                   return '🏛️';
+  if (/play|soft|slide|swing|playground|kids|children/.test(n))       return '🛝';
+  if (/sea|beach|coast|seaside|sand|shore/.test(n))                   return '🏖️';
+  if (/garden|nature|green|forest|walk|hike|park/.test(n))            return '🌿';
+  return EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
+}
 
 function loadCollections(): Collection[] {
   try {
     const raw = localStorage.getItem(COLLECTIONS_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Collection[]) : [];
+    if (!raw) return [];
+    // Apply guessEmoji migration on load so existing collections get updated icons
+    const cols = JSON.parse(raw) as Collection[];
+    return cols.map(c => ({ ...c, emoji: guessEmoji(c.name) }));
   } catch { return []; }
 }
 
@@ -69,9 +89,17 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
       .then(({ data, error }) => {
         if (error) { console.error('[Supabase] collections load error:', error.message); return; }
         if (data) {
-          const cols = (data as Record<string, unknown>[]).map(toCollection);
+          const cols = (data as Record<string, unknown>[])
+            .map(toCollection)
+            .map(c => ({ ...c, emoji: guessEmoji(c.name) }));
           setCollections(cols);
           saveCollections(cols);
+          // Sync updated emojis back to Supabase
+          cols.forEach(c => {
+            supabase?.from('collections').upsert(toRow(c)).then(({ error }) => {
+              if (error) console.error('[Supabase] emoji migration upsert error:', error.message);
+            });
+          });
         }
       });
   }, []);
@@ -99,7 +127,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
       id: Math.random().toString(36).slice(2),
       name,
       placeIds: [],
-      emoji: emoji ?? EMOJIS[Math.floor(Math.random() * EMOJIS.length)],
+      emoji: emoji ?? guessEmoji(name),
       createdAt: Date.now(),
     };
     update(prev => [...prev, col], col);

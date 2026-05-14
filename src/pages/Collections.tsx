@@ -176,9 +176,10 @@ function DetailModal({ collection, savedPlaces, onAdd, onRemove, onClose }: {
 }
 
 // ── Collection Card ───────────────────────────────────────────────────────────
-function CollectionCard({ collection, index, isMenuOpen, menuRef, onCardClick, onMenuToggle, onRename, onDelete }: {
+function CollectionCard({ collection, index, savedPlaceIds, isMenuOpen, menuRef, onCardClick, onMenuToggle, onRename, onDelete }: {
   collection: Collection;
   index: number;
+  savedPlaceIds: Set<string>;
   isMenuOpen: boolean;
   menuRef: RefObject<HTMLDivElement | null>;
   onCardClick: () => void;
@@ -209,7 +210,7 @@ function CollectionCard({ collection, index, isMenuOpen, menuRef, onCardClick, o
       </div>
       <div className="p-6 flex-1 flex flex-col justify-center">
         <h3 className="font-headline text-xl font-bold text-on-background mb-1">{collection.name}</h3>
-        <p className="text-on-surface-variant text-sm font-medium">{collection.placeIds.length} place{collection.placeIds.length !== 1 ? 's' : ''}</p>
+        <p className="text-on-surface-variant text-sm font-medium">{collection.placeIds.filter(id => savedPlaceIds.has(id)).length} place{collection.placeIds.filter(id => savedPlaceIds.has(id)).length !== 1 ? 's' : ''}</p>
       </div>
     </div>
   );
@@ -317,6 +318,7 @@ export default function Collections() {
               key={col.id}
               collection={col}
               index={i}
+              savedPlaceIds={new Set(savedPlaces.map(p => p.id))}
               isMenuOpen={activeMenu === col.id}
               menuRef={menuRef}
               onCardClick={() => setDetailId(col.id)}

@@ -10,6 +10,7 @@ import MapEditor from './pages/MapEditor';
 import Collections from './pages/Collections';
 import SavedPlaces from './pages/SavedPlaces';
 import Spotlist from './pages/Spotlist';
+import QuestMaker from './pages/QuestMaker';
 import { PlacesProvider } from './context/PlacesContext';
 import { CollectionsProvider } from './context/CollectionsContext';
 import { SpotlistProvider } from './context/SpotlistContext';
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="collections" element={<Collections />} />
             <Route path="saved" element={<SavedPlaces />} />
             <Route path="spotlist" element={<Spotlist />} />
+            <Route path="quest-maker" element={<QuestMaker />} />
 
             {/* Catch-all to default to home/discover */}
             <Route path="*" element={<Navigate to="/" replace />} />
