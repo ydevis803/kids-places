@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Wand2,
   Footprints,
@@ -104,6 +104,13 @@ export default function QuestMaker() {
   const [aiError, setAiError] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Clear selection whenever new AI suggestions arrive
+  useEffect(() => {
+    if (aiSuggestions.length > 0) {
+      setSelectedIds(new Set());
+    }
+  }, [aiSuggestions]);
+
   // Places pool: if a collection is selected, use only its places; otherwise use all
   const sourcePlaces = useMemo<Place[]>(() => {
     if (!selectedCollectionId) return allPlaces;
@@ -201,7 +208,6 @@ Return ONLY a JSON array (no markdown, no extra text):
       }
 
       setAiSuggestions(suggestions);
-      setSelectedIds(new Set(suggestions.map(s => s.id)));
     } catch (err) {
       setAiError('AI could not generate suggestions. Please try again.');
       console.error('[QuestMaker] AI error:', err);
