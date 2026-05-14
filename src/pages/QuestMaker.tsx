@@ -20,6 +20,7 @@ import {
   Minus,
   Loader2,
   FolderHeart,
+  CalendarPlus,
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { usePlaces } from '../context/PlacesContext';
@@ -40,6 +41,14 @@ interface QuestPlan {
   date: string;
   startTime: string;
   places: QuestPlace[];
+}
+
+interface RestaurantSuggestion {
+  name: string;
+  area: string;
+  cuisine: string;
+  rating: string;
+  whyPerfect: string;
 }
 
 // ── Stage metadata ────────────────────────────────────────────────────────────
@@ -97,6 +106,8 @@ export default function QuestMaker() {
   const [startingPostcode, setStartingPostcode] = useState('SE9 2AY');
   const [maxDistance, setMaxDistance] = useState('30');
   const [prefs, setPrefs] = useState({ outdoor: false, indoor: false, free: false, educational: false });
+  const [includeRestaurant, setIncludeRestaurant] = useState(true);
+  const [timeOfDay, setTimeOfDay] = useState<'morning' | 'afternoon' | 'allday'>('allday');
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
   const [showCollectionDropdown, setShowCollectionDropdown] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -122,6 +133,10 @@ export default function QuestMaker() {
 
   // Stage 2
   const [questPlan, setQuestPlan] = useState<QuestPlan>({ date: '', startTime: '09:00', places: [] });
+  const [planText, setPlanText] = useState('');
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState('');
+  const [restaurantSuggestions, setRestaurantSuggestions] = useState<RestaurantSuggestion[]>([]);
 
   // Stage 3
   const [invite, setInvite] = useState('');
@@ -149,10 +164,11 @@ export default function QuestMaker() {
     setAiError('');
     setAiSuggestions([]);
 
-    const prefLabels = (Object.keys(prefs) as (keyof typeof prefs)[])
-      .filter(k => prefs[k])
-      .map(k => k)
-      .join(', ') || 'no specific preferences';
+    const prefLabels = [
+      ...(Object.keys(prefs) as (keyof typeof prefs)[]).filter(k => prefs[k]),
+      ...(includeRestaurant ? ['include restaurant/meal stop'] : []),
+    ].join(', ') || 'no specific preferences';
+    const timeLabel = timeOfDay === 'morning' ? 'Morning (finish by lunchtime)' : timeOfDay === 'afternoon' ? 'Afternoon/Evening' : 'All day';
 
     const selectedCol = selectedCollectionId ? collections.find(c => c.id === selectedCollectionId) : null;
 
@@ -170,6 +186,7 @@ User details:
 - Date: ${date || 'not specified'}
 - Starting postcode: ${startingPostcode || 'not specified'}
 - Max travel distance: ${maxDistance} miles
+- Time of day: ${timeLabel}
 - Preferences: ${prefLabels}${selectedCol ? `
 - Collection filter: "${selectedCol.name}" — only places from this collection are in the list` : ''}
 
@@ -226,11 +243,96 @@ Return ONLY a JSON array (no markdown, no extra text):
 
   const goToStage2 = () => {
     const selected = aiSuggestions.filter(s => selectedIds.has(s.id));
-    setQuestPlan({ date, startTime: '09:00', places: selected });
+    // Default start time: 10:00 for all-day / afternoon, 09:00 for morning
+    const defaultStart = timeOfDay === 'morning' ? '09:00' : '10:00';
+    // Single place + all-day → default to 7 hours (10:00–17:00)
+    const places = selected.map((p, i) =>
+      i === 0 && selected.length === 1 && timeOfDay === 'allday'
+        ? { ...p, durationHours: 7 }
+        : p,
+    );
+    const newPlan = { date, startTime: defaultStart, places };
+    setQuestPlan(newPlan);
+    setPlanText('');
+    setRestaurantSuggestions([]);
+    setPlanError('');
     setStage(2);
+    handleGeneratePlan(newPlan);
   };
 
   // ── Stage 2: Plan-a-Saurus ────────────────────────────────────────────────────
+
+  const handleGeneratePlan = async (plan: QuestPlan) => {
+    const apiKey = getEnv('GEMINI_API_KEY');
+    const timeline = (() => {
+      let current = plan.startTime;
+      return plan.places.map(p => {
+        const start = current;
+        const end = addMinutes(start, Math.round(p.durationHours * 60));
+        current = addMinutes(end, 20);
+        return { ...p, start, end };
+      });
+    })();
+
+    if (!apiKey) {
+      const fallback = timeline.map(p => `${p.start}–${p.end}  📍 ${p.name}${p.postcode ? ` (${p.postcode})` : ''}`).join('\n\n');
+      setPlanText(`🗓️ ${plan.date || 'Your Adventure Day'}\n\n${fallback}\n\n🏠 Home time!`);
+      return;
+    }
+
+    setPlanLoading(true);
+    setPlanError('');
+
+    const stopsText = timeline
+      .map(p => `  - ${p.start}–${p.end}: ${p.name}${p.postcode ? ` (${p.postcode})` : ''}, duration: ${formatDuration(p.durationHours)}`)
+      .join('\n');
+    const postcodes = [...new Set(timeline.map(p => p.postcode).filter(Boolean))].join(', ');
+    const timeLabel = timeOfDay === 'morning' ? 'Morning' : timeOfDay === 'afternoon' ? 'Afternoon/Evening' : 'All day';
+
+    const prompt = `You are a UK family day-out logistics planner. Write a concise, factual itinerary using only information you are confident is accurate for these specific venues. No invented details.
+
+STRICT RULES:
+- Only state facts you are certain about for each specific venue (opening hours, entry prices, named attractions, car parks).
+- If you are not certain of a specific fact (e.g. exact show times, current prices), write "check [venue website]" instead of guessing.
+- Do NOT invent show times, prices, or parking names you are unsure of.
+- Travel times should be realistic driving estimates between the given postcodes.
+- No opinions, no enthusiasm, no filler sentences.
+- Plain text only — no markdown, no bullet symbols, no asterisks.
+- Each stop: max 5 lines. Each line starts with a label e.g. "Travel:", "Arrive:", "Highlights:", "Shows/Sessions:", "Entry:", "Parking:".
+
+Trip details:
+- Date: ${plan.date || 'not specified'}
+- Start time: ${plan.startTime}
+- Kids ages: ${kidsAges.trim() || 'all ages'}
+- Starting postcode: ${startingPostcode}
+- Time of day: ${timeLabel}
+- Stops:
+${stopsText}
+- Meal stop: ${includeRestaurant ? `YES — add a meal stop as the last item before home. Also suggest 3 real, named family-friendly pubs or restaurants near postcodes: ${postcodes || startingPostcode}. Only suggest venues you are confident exist and have a Google rating above 4.0.` : 'NO — do not mention food'}
+
+Return ONLY valid JSON (no markdown fences):
+{
+  "itinerary": "plain text itinerary — stops separated by a blank line",
+  "restaurants": ${includeRestaurant ? '[{ "name": "exact real venue name", "area": "town/area", "cuisine": "food type", "rating": "4.x/5 — only if you are confident, otherwise write unknown", "whyPerfect": "one factual sentence listing a known feature e.g. children\'s menu, highchairs, beer garden" }]' : '[]'}
+}`;
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+      const raw = (response.text ?? '').trim()
+        .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```\s*$/, '');
+      const parsed = JSON.parse(raw) as { itinerary: string; restaurants: RestaurantSuggestion[] };
+      setPlanText(parsed.itinerary ?? '');
+      setRestaurantSuggestions(parsed.restaurants ?? []);
+    } catch (err) {
+      console.error('[QuestMaker] Plan error:', err);
+      setPlanError('Could not auto-generate the plan — you can still write it manually below.');
+      const fallback = timeline.map(p => `${p.start}–${p.end}  📍 ${p.name}${p.postcode ? ` (${p.postcode})` : ''}`).join('\n\n');
+      setPlanText(`🗓️ ${plan.date || 'Your Adventure Day'}\n\n${fallback}\n\n🏠 Home time!`);
+    } finally {
+      setPlanLoading(false);
+    }
+  };
 
   const movePlace = (index: number, dir: -1 | 1) => {
     setQuestPlan(prev => {
@@ -317,6 +419,24 @@ Write 3–4 short paragraphs: a fun opening, a description of the adventure, a l
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { /* ignore */ }
+  };
+
+  const buildGoogleCalendarUrl = () => {
+    const title = encodeURIComponent(
+      questPlan.places.length > 0
+        ? `Family Day Out — ${questPlan.places.map(p => p.name).join(', ')}`
+        : 'Family Adventure Day',
+    );
+    const details = encodeURIComponent(invite || planText || '');
+    const location = encodeURIComponent(
+      questPlan.places.map(p => p.postcode ?? p.name).join(' → '),
+    );
+    // Build date strings: YYYYMMDD from questPlan.date + start/end times
+    const d = questPlan.date ? questPlan.date.replace(/-/g, '') : '';
+    const startT = questPlan.startTime.replace(':', '') + '00';
+    const lastEnd = timeline.length > 0 ? timeline[timeline.length - 1].end.replace(':', '') + '00' : startT;
+    const dates = d ? `${d}T${startT}/${d}T${lastEnd}` : '';
+    return `https://www.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}${dates ? `&dates=${dates}` : ''}`;
   };
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -437,9 +557,37 @@ Write 3–4 short paragraphs: a fun opening, a description of the adventure, a l
               </div>
             </div>
 
+            {/* Restaurant checkbox */}
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeRestaurant}
+                onChange={e => setIncludeRestaurant(e.target.checked)}
+                className="w-4 h-4 rounded accent-primary cursor-pointer"
+              />
+              <span className="text-sm font-label font-semibold text-on-surface">🍽️ Include a Restaurant / Meal stop</span>
+            </label>
+
             {/* Preference toggles */}
             <div className="flex flex-col gap-2">
               <p className="text-sm font-label font-semibold text-on-surface">Preferences</p>
+              <div className="flex flex-wrap gap-2">
+                {/* Time of day selector */}
+                {(['morning', 'afternoon', 'allday'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setTimeOfDay(t)}
+                    className={cn(
+                      'px-4 py-2 rounded-xl text-sm font-label font-semibold border transition-all',
+                      timeOfDay === t
+                        ? 'bg-secondary text-on-secondary border-secondary'
+                        : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:border-secondary/40',
+                    )}
+                  >
+                    {t === 'morning' ? '🌅 Morning' : t === 'afternoon' ? '🌆 Afternoon' : '☀️ All Day'}
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-wrap gap-2">
                 {(Object.keys(prefs) as (keyof typeof prefs)[]).map(key => (
                   <button
@@ -618,7 +766,7 @@ Write 3–4 short paragraphs: a fun opening, a description of the adventure, a l
         <div className="flex flex-col gap-6">
           <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 p-6 shadow-ambient flex flex-col gap-5">
             <div className="flex items-center gap-3">
-              <Map className="w-5 h-5 text-primary" />
+              <Footprints className="w-5 h-5 text-primary" />
               <h2 className="font-headline text-xl font-bold text-on-surface">Build Your Perfect Day</h2>
             </div>
 
@@ -702,6 +850,36 @@ Write 3–4 short paragraphs: a fun opening, a description of the adventure, a l
                 </div>
               ))}
 
+              {/* Restaurant rows — shown before home if available */}
+              {timeline.length > 0 && includeRestaurant && restaurantSuggestions.length > 0 && (() => {
+                const mealTime = timeline[timeline.length - 1].end;
+                return (
+                  <div className="flex items-start gap-3">
+                    <div className="flex flex-col items-center w-14 flex-shrink-0">
+                      <span className="text-xs font-label font-bold text-amber-600">{mealTime}</span>
+                      <div className="flex-1 w-0.5 bg-amber-200 my-1 rounded-full min-h-[1.5rem]" />
+                    </div>
+                    <div className="flex-1 bg-amber-50 rounded-2xl p-4 border border-amber-200 flex flex-col gap-2">
+                      <p className="text-xs font-label font-semibold text-amber-700">🍽️ Meal Stop — pick one:</p>
+                      {restaurantSuggestions.map((r, i) => (
+                        <div key={i} className="flex items-center gap-2 flex-wrap">
+                          <a
+                            href={`https://www.google.com/maps/search/${encodeURIComponent(r.name + ' ' + r.area)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm font-label font-bold text-primary hover:underline"
+                          >
+                            {r.name}
+                          </a>
+                          <span className="text-xs text-on-surface-variant">{r.area} · {r.cuisine}</span>
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-label font-semibold">⭐ {r.rating}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Home time row */}
               {timeline.length > 0 && (
                 <div className="flex items-center gap-3">
@@ -714,6 +892,75 @@ Write 3–4 short paragraphs: a fun opening, a description of the adventure, a l
                 </div>
               )}
             </div>
+          </div>
+
+          {/* AI Plan editor */}
+          <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 p-6 shadow-ambient flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-5 h-5 text-primary" />
+                <h2 className="font-headline text-xl font-bold text-on-surface">Your AI Itinerary</h2>
+              </div>
+              <button
+                onClick={() => handleGeneratePlan(questPlan)}
+                disabled={planLoading}
+                className="flex items-center gap-2 py-2 px-4 rounded-xl bg-surface-container border border-outline-variant/20 text-on-surface font-label font-semibold hover:bg-surface-container-high transition-all disabled:opacity-40 text-sm"
+              >
+                {planLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4 text-primary" />}
+                {planLoading ? 'Generating…' : 'Regenerate'}
+              </button>
+            </div>
+
+            {planLoading && (
+              <div className="flex flex-col items-center justify-center py-12 gap-3 text-on-surface-variant">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <p className="font-label text-sm">Building your perfect day plan…</p>
+              </div>
+            )}
+
+            {planError && !planLoading && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 px-4 py-3 rounded-xl">{planError}</p>
+            )}
+
+            {!planLoading && (
+              <textarea
+                value={planText}
+                onChange={e => setPlanText(e.target.value)}
+                placeholder="Your itinerary will appear here… you can also type or edit it freely."
+                rows={12}
+                className="w-full px-4 py-3 rounded-2xl border border-outline-variant/30 bg-surface-container text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors font-body text-sm leading-relaxed resize-y"
+              />
+            )}
+
+            {/* Restaurant suggestions */}
+            {restaurantSuggestions.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <p className="text-sm font-label font-semibold text-on-surface">🍽️ Suggested Restaurants &amp; Pubs Nearby</p>
+                {restaurantSuggestions.map((r, i) => (
+                  <div key={i} className="flex items-start gap-4 bg-surface-container rounded-2xl p-4 border border-outline-variant/10">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0 text-lg">
+                      🍽️
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <a
+                          href={`https://www.google.com/maps/search/${encodeURIComponent(r.name + ' ' + r.area)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-headline font-bold text-primary hover:underline"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          {r.name}
+                        </a>
+                        <span className="text-xs px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 font-label font-semibold">⭐ {r.rating}</span>
+                      </div>
+                      <p className="text-xs text-on-surface-variant mt-0.5">{r.area} · {r.cuisine}</p>
+                      <p className="text-sm text-on-surface-variant mt-1 leading-relaxed">{r.whyPerfect}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 justify-between">
@@ -748,17 +995,29 @@ Write 3–4 short paragraphs: a fun opening, a description of the adventure, a l
                 <PartyPopper className="w-5 h-5 text-primary" />
                 <h2 className="font-headline text-xl font-bold text-on-surface">Your Fun-vite</h2>
               </div>
-              <button
-                onClick={handleCopy}
-                disabled={!invite || inviteLoading}
-                className="flex items-center gap-2 py-2 px-4 rounded-xl bg-surface-container text-on-surface font-label font-semibold hover:bg-surface-container-high border border-outline-variant/20 transition-all disabled:opacity-40"
-              >
-                {copied ? (
-                  <><Check className="w-4 h-4 text-green-600" /> Copied!</>
-                ) : (
-                  <><Copy className="w-4 h-4" /> Copy</>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCopy}
+                  disabled={!invite || inviteLoading}
+                  className="flex items-center gap-2 py-2 px-4 rounded-xl bg-surface-container text-on-surface font-label font-semibold hover:bg-surface-container-high border border-outline-variant/20 transition-all disabled:opacity-40"
+                >
+                  {copied ? (
+                    <><Check className="w-4 h-4 text-green-600" /> Copied!</>
+                  ) : (
+                    <><Copy className="w-4 h-4" /> Copy</>
+                  )}
+                </button>
+                <a
+                  href={buildGoogleCalendarUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Add to Google Calendar"
+                  className={`flex items-center gap-2 py-2 px-4 rounded-xl bg-surface-container text-on-surface font-label font-semibold hover:bg-surface-container-high border border-outline-variant/20 transition-all ${!invite && !planText ? 'pointer-events-none opacity-40' : ''}`}
+                >
+                  <CalendarPlus className="w-4 h-4 text-primary" />
+                  <span className="hidden sm:inline">Add to Calendar</span>
+                </a>
+              </div>
             </div>
 
             {inviteLoading ? (
