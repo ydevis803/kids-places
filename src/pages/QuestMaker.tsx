@@ -484,7 +484,7 @@ Write 3–4 short paragraphs: a fun opening, a description of the adventure, a l
                               Clear filter
                             </button>
                           )}
-                          {collections.map(col => (
+                          {collections.filter(col => col.placeIds.some(id => allPlaces.some(p => p.id === id))).map(col => (
                             <button
                               key={col.id}
                               onClick={() => { setSelectedCollectionId(col.id); setShowCollectionDropdown(false); }}
@@ -497,7 +497,7 @@ Write 3–4 short paragraphs: a fun opening, a description of the adventure, a l
                             >
                               <span>{col.emoji}</span>
                               <span>{col.name}</span>
-                              <span className="ml-auto text-xs text-on-surface-variant">{col.placeIds.length}</span>
+                              <span className="ml-auto text-xs text-on-surface-variant">{col.placeIds.filter(id => allPlaces.some(p => p.id === id)).length}</span>
                             </button>
                           ))}
                         </>
